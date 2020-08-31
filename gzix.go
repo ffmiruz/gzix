@@ -28,6 +28,9 @@ func main() {
     defer index.Close()
 
     for _, f := range files {
+        if f.IsDir() {
+            continue
+        }
         fpath := dir + "/" + f.Name()
         value := gzAdd(zf, fpath)
         index.WriteString(f.Name() + value)
