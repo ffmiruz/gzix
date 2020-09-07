@@ -13,7 +13,19 @@ import (
 )
 
 func main() {
-    dir := parse_args()
+    if len(os.Args) == 2 {
+        index(os.Args[1])
+    } else if os.Args[1] == "-g" && len(os.Args) == 5 {
+        gzGet(os.Args[2], os.Args[3], os.Args[4])
+    } else {
+        log.Fatal(`Usage:-
+                    Index a folder: gzix <folder>
+                    Get value     : gzix -g  <index_file> <gz_file> <file_name>`)
+    }
+}
+
+// Create files index and database of a folder
+func index(dir string) {
     files, err := readDir(dir)
     if err != nil {
         log.Fatal(err)
@@ -41,20 +53,6 @@ func main() {
         value := gzAdd(zf, fpath)
         index.WriteString(f.Name() + value)
     }
-
-}
-
-func parse_args() string {
-    if len(os.Args) < 2 {
-        log.Fatal(`indexing usage: gzix <folder>
-                    get usage     : gzix -g  <file_name>`)
-    }
-    if os.Args[1] == "-g" {
-        gzGet(os.Args[2], os.Args[3], os.Args[4])
-        log.Fatal("done getting...")
-    }
-    folder := os.Args[1]
-    return folder
 }
 
 func readDir(dirname string) ([]os.FileInfo, error) {
@@ -72,7 +70,7 @@ func readDir(dirname string) ([]os.FileInfo, error) {
 
 // gzip file and concatenate into the main gzip.
 // Return string of fotmatted offset start position and binary size
-// |<offset>|<size>
+// <filename>,<offset>,<size>
 func gzAdd(zf *os.File, fpath string) string {
     f, _ := os.Open(fpath)
     defer f.Close()
@@ -114,7 +112,6 @@ func gzGet(index, gz, fname string) {
     defer idx.Close()
 
     offset, length := meta(idx, fname)
-    fmt.Println(offset, length)
 
     // Open database file
     f, err := os.Open(gz)
@@ -123,7 +120,7 @@ func gzGet(index, gz, fname string) {
     }
     defer f.Close()
 
-    process(chunk(f, int64(offset), int64(length)))
+    gunzip(frame(f, int64(offset), int64(length)))
 }
 
 func meta(file *os.File, fname string) (offset, length int) {
@@ -153,13 +150,12 @@ func meta(file *os.File, fname string) (offset, length int) {
 
 }
 
-func chunk(file *os.File, offset, byteLength int64) *gzip.Reader {
-
-    ret, err := file.Seek(offset, os.SEEK_SET) // Byte offset after file start
+func frame(file *os.File, offset, byteLength int64) *gzip.Reader {
+    start, err := file.Seek(offset, os.SEEK_SET)
     if err != nil {
         log.Fatal(err)
     }
-    log.Printf("Seek to byte %d …\n", ret)
+    log.Printf("Start read at byte: %d", start)
 
     r, err := gzip.NewReader(io.NewSectionReader(file, offset, byteLength))
     if err != nil {
@@ -168,7 +164,7 @@ func chunk(file *os.File, offset, byteLength int64) *gzip.Reader {
     return r
 }
 
-func process(r io.Reader) {
+func gunzip(r io.Reader) {
     b, err := ioutil.ReadAll(r)
     if err != nil {
         log.Fatal(err)
