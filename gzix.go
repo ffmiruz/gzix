@@ -1,11 +1,15 @@
 package main
 
 import (
+    "bufio"
     "compress/gzip"
     "fmt"
+    "io"
     "io/ioutil"
     "log"
     "os"
+    "strconv"
+    "strings"
 )
 
 func main() {
@@ -15,12 +19,14 @@ func main() {
         log.Fatal(err)
     }
 
+    // Open gzip file.
     zf, _ := os.OpenFile(dir+".gz", os.O_TRUNC|os.O_CREATE|os.O_WRONLY, 0644)
     if err != nil {
         log.Fatal(err)
     }
     defer zf.Close()
 
+    // Open index file.
     index, err := os.OpenFile(dir+".idx", os.O_TRUNC|os.O_CREATE|os.O_WRONLY, 0644)
     if err != nil {
         log.Fatal(err)
@@ -40,7 +46,12 @@ func main() {
 
 func parse_args() string {
     if len(os.Args) < 2 {
-        log.Fatal("usage: gzix <folder_location>")
+        log.Fatal(`indexing usage: gzix <folder>
+                    get usage     : gzix -g  <file_name>`)
+    }
+    if os.Args[1] == "-g" {
+        gzGet(os.Args[2], os.Args[3], os.Args[4])
+        log.Fatal("done getting...")
     }
     folder := os.Args[1]
     return folder
@@ -90,6 +101,77 @@ func gzAdd(zf *os.File, fpath string) string {
     }
 
     size := ninfo.Size() - offset
-    value := fmt.Sprintf("|%v|%v\n", offset, size)
+    value := fmt.Sprintf(",%v,%v\n", offset, size)
     return value
+}
+
+func gzGet(index, gz, fname string) {
+    // Open index file
+    idx, err := os.Open(index)
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer idx.Close()
+
+    offset, length := meta(idx, fname)
+    fmt.Println(offset, length)
+
+    // Open database file
+    f, err := os.Open(gz)
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer f.Close()
+
+    process(chunk(f, int64(offset), int64(length)))
+}
+
+func meta(file *os.File, fname string) (offset, length int) {
+    var err error
+    scanner := bufio.NewScanner(file)
+    for scanner.Scan() {
+        line := scanner.Text()
+        if strings.HasPrefix(line, fname+",") {
+            info := strings.Split(line, ",")
+            offsetText := info[1]
+            lengthText := info[2]
+            offset, err = strconv.Atoi(offsetText)
+            if err != nil {
+                log.Fatal(err)
+            }
+            length, err = strconv.Atoi(lengthText)
+            if err != nil {
+                log.Fatal(err)
+            }
+            break
+        }
+    }
+    if err := scanner.Err(); err != nil {
+        log.Fatal(err)
+    }
+    return
+
+}
+
+func chunk(file *os.File, offset, byteLength int64) *gzip.Reader {
+
+    ret, err := file.Seek(offset, os.SEEK_SET) // Byte offset after file start
+    if err != nil {
+        log.Fatal(err)
+    }
+    log.Printf("Seek to byte %d …\n", ret)
+
+    r, err := gzip.NewReader(io.NewSectionReader(file, offset, byteLength))
+    if err != nil {
+        log.Fatal(err)
+    }
+    return r
+}
+
+func process(r io.Reader) {
+    b, err := ioutil.ReadAll(r)
+    if err != nil {
+        log.Fatal(err)
+    }
+    log.Printf("Decompressed %d bytes, Decoded: %#v\n", len(b), string(b))
 }
