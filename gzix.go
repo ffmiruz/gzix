@@ -4,6 +4,7 @@ import (
     "bufio"
     "compress/gzip"
     "fmt"
+    "github.com/pkg/errors"
     "io"
     "io/ioutil"
     "log"
@@ -14,8 +15,11 @@ import (
 
 func main() {
     if len(os.Args) == 2 {
-        index(os.Args[1])
-    } else if os.Args[1] == "-g" && len(os.Args) == 5 {
+        err := index(os.Args[1])
+        if err != nil {
+            log.Println(err)
+        }
+    } else if len(os.Args) == 5 && os.Args[1] == "-g" {
         gzGet(os.Args[2], os.Args[3], os.Args[4])
     } else {
         log.Fatal(`Usage:-
@@ -25,23 +29,23 @@ func main() {
 }
 
 // Create files index and database of a folder
-func index(dir string) {
+func index(dir string) error {
     files, err := readDir(dir)
     if err != nil {
-        log.Fatal(err)
+        return errors.Wrap(err, "Can't get list of files")
     }
 
     // Open gzip file.
     zf, _ := os.OpenFile(dir+".gz", os.O_TRUNC|os.O_CREATE|os.O_WRONLY, 0644)
     if err != nil {
-        log.Fatal(err)
+        return errors.Wrap(err, "Can't open/create gzip file")
     }
     defer zf.Close()
 
     // Open index file.
     index, err := os.OpenFile(dir+".idx", os.O_TRUNC|os.O_CREATE|os.O_WRONLY, 0644)
     if err != nil {
-        log.Fatal(err)
+        return errors.Wrap(err, "Can't open/create index file")
     }
     defer index.Close()
 
@@ -50,9 +54,14 @@ func index(dir string) {
             continue
         }
         fpath := dir + "/" + f.Name()
-        value := gzAdd(zf, fpath)
+        value, err := gzAdd(zf, fpath)
+        if err != nil {
+            log.Printf("Can't add %v: %v", fpath, err)
+            continue
+        }
         index.WriteString(f.Name() + value)
     }
+    return nil
 }
 
 func readDir(dirname string) ([]os.FileInfo, error) {
@@ -71,19 +80,20 @@ func readDir(dirname string) ([]os.FileInfo, error) {
 // gzip file and concatenate into the main gzip.
 // Return string of fotmatted offset start position and binary size
 // <filename>,<offset>,<size>
-func gzAdd(zf *os.File, fpath string) string {
+func gzAdd(zf *os.File, fpath string) (string, error) {
+    var value string
     f, _ := os.Open(fpath)
     defer f.Close()
 
     info, err := zf.Stat()
     if err != nil {
-        log.Fatal(err)
+        return value, err
     }
     offset := info.Size()
 
     b, err := ioutil.ReadAll(f)
     if err != nil {
-        log.Fatal(err)
+        return value, err
     }
 
     zw := gzip.NewWriter(zf)
@@ -95,12 +105,12 @@ func gzAdd(zf *os.File, fpath string) string {
 
     ninfo, err := zf.Stat()
     if err != nil {
-        log.Fatal(err)
+        return value, err
     }
 
     size := ninfo.Size() - offset
-    value := fmt.Sprintf(",%v,%v\n", offset, size)
-    return value
+    value = fmt.Sprintf(",%v,%v\n", offset, size)
+    return value, nil
 }
 
 func gzGet(index, gz, fname string) {
